@@ -7,7 +7,10 @@ import copy, logging
 import torch
 import torch.nn as nn
 from torch.autograd import Function
-from openpoints.cpp import pointnet2_cuda
+try:
+    from openpoints.cpp import pointnet2_cuda
+except Exception:
+    pointnet2_cuda = None
 
 class KNN(nn.Module):
     def __init__(self, neighbors, transpose_mode=True):
@@ -24,7 +27,11 @@ class KNN(nn.Module):
             [int]: neighbor idx. [B, M, K]
         """
         dist = torch.cdist(support, query)
-        k_dist = dist.topk(k=self.neighbors, dim=1, largest=False)
+        max_neighbors = int(support.shape[1])
+        if max_neighbors <= 0:
+            raise ValueError("KNN received an empty support point set.")
+        k = min(int(self.neighbors), max_neighbors)
+        k_dist = dist.topk(k=k, dim=1, largest=False)
         return k_dist.values, k_dist.indices.transpose(1, 2).contiguous().int()
 
 # dilated knn
@@ -114,9 +121,6 @@ class GroupingOperation(Function):
         return grad_features, None
 
 
-grouping_operation = GroupingOperation.apply
-
-
 def torch_grouping_operation(features, idx):
     r"""from torch points kernels
     Parameters
@@ -131,10 +135,13 @@ def torch_grouping_operation(features, idx):
     torch.Tensor
         (B, C, npoint, nsample) tensor
     """
-    all_idx = idx.reshape(idx.shape[0], -1)
+    all_idx = idx.to(torch.long).reshape(idx.shape[0], -1)
     all_idx = all_idx.unsqueeze(1).repeat(1, features.shape[1], 1)
     grouped_features = features.gather(2, all_idx)
     return grouped_features.reshape(idx.shape[0], features.shape[1], idx.shape[1], idx.shape[2])
+
+
+grouping_operation = GroupingOperation.apply if pointnet2_cuda is not None else torch_grouping_operation
 
 
 class GatherOperation(Function):
@@ -200,7 +207,20 @@ class BallQuery(Function):
         return None, None, None, None
 
 
-ball_query = BallQuery.apply
+def _torch_ball_query(radius: float, nsample: int, xyz: torch.Tensor, new_xyz: torch.Tensor) -> torch.Tensor:
+    distances = torch.cdist(new_xyz, xyz)
+    k = min(int(nsample), int(xyz.shape[1]))
+    idx = torch.topk(distances, k=k, dim=-1, largest=False).indices
+    gathered = torch.gather(distances, -1, idx)
+    fallback = idx[..., :1].expand(-1, -1, idx.shape[-1])
+    idx = torch.where(gathered <= float(radius), idx, fallback)
+    if k < int(nsample):
+        pad = idx[..., -1:].expand(-1, -1, int(nsample) - k)
+        idx = torch.cat([idx, pad], dim=-1)
+    return idx.contiguous().int()
+
+
+ball_query = BallQuery.apply if pointnet2_cuda is not None else _torch_ball_query
 
 
 class QueryAndGroup(nn.Module):

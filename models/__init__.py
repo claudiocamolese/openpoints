@@ -1,10 +1,13 @@
-"""
-Author: PointNeXt
+"""Minimal model exports for local PointNext reuse."""
 
-"""
-# from .backbone import PointNextEncoder
-from .backbone import *
-from .segmentation import * 
-from .classification import BaseCls
-from .reconstruction import MaskedPointViT
 from .build import build_model_from_cfg
+
+__all__ = ["build_model_from_cfg"]
+
+try:
+    from .backbone.pointnext import PointNextEncoder, PointNextDecoder
+
+    __all__ += ["PointNextEncoder", "PointNextDecoder"]
+except Exception:
+    PointNextEncoder = None
+    PointNextDecoder = None

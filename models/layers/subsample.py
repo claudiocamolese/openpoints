@@ -5,7 +5,10 @@ import torch
 import torch.nn as nn
 from torch.autograd import Function
 import math
-from openpoints.cpp.pointnet2_batch import pointnet2_cuda
+try:
+    from openpoints.cpp.pointnet2_batch import pointnet2_cuda
+except Exception:
+    pointnet2_cuda = None
 
 
 class BaseSampler(ABC):
@@ -102,7 +105,25 @@ class FurthestPointSampling(Function):
         return None, None
 
 
-furthest_point_sample = FurthestPointSampling.apply
+def _torch_furthest_point_sample(xyz: torch.Tensor, npoint: int) -> torch.Tensor:
+    batch_size, num_points, _ = xyz.shape
+    npoint = min(int(npoint), int(num_points))
+    centroids = torch.zeros(batch_size, npoint, dtype=torch.long, device=xyz.device)
+    distance = torch.full((batch_size, num_points), float("inf"), device=xyz.device)
+    farthest = torch.randint(0, num_points, (batch_size,), device=xyz.device)
+    batch_indices = torch.arange(batch_size, device=xyz.device)
+
+    for index in range(npoint):
+        centroids[:, index] = farthest
+        centroid = xyz[batch_indices, farthest].unsqueeze(1)
+        dist = torch.sum((xyz - centroid) ** 2, dim=-1)
+        distance = torch.minimum(distance, dist)
+        farthest = torch.max(distance, dim=-1).indices
+
+    return centroids.int()
+
+
+furthest_point_sample = FurthestPointSampling.apply if pointnet2_cuda is not None else _torch_furthest_point_sample
 
 
 class GatherOperation(Function):

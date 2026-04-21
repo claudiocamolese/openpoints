@@ -1,8 +1,26 @@
-from .random import set_random_seed
-from .config import EasyConfig, print_args
-from .logger import setup_logger_dist, generate_exp_directory, resume_exp_directory
-from .wandb import Wandb
-from .metrics import AverageMeter, ConfusionMatrix, get_mious
-from .ckpt_util import resume_model, resume_optimizer, resume_checkpoint, save_checkpoint, load_checkpoint, \
-    get_missing_parameters_message, get_unexpected_parameters_message, cal_model_parm_nums, load_checkpoint_inv
-from .dist_utils import reduce_tensor, gather_tensor, find_free_port
+"""Lightweight utility exports for local model reuse.
+
+OpenPoints normally re-exports many optional utilities here. Those imports pull
+extra dependencies that are not required when we only want to instantiate the
+PointNext encoder inside NTRL. Keep the registry always available and expose the
+rest on a best-effort basis.
+"""
+
+from . import registry
+
+__all__ = ["registry"]
+
+try:
+    from .random import set_random_seed
+
+    __all__.append("set_random_seed")
+except Exception:
+    set_random_seed = None
+
+try:
+    from .config import EasyConfig, print_args
+
+    __all__ += ["EasyConfig", "print_args"]
+except Exception:
+    EasyConfig = None
+    print_args = None
